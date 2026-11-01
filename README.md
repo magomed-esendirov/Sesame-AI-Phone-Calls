@@ -63,7 +63,9 @@ Maya живёт в **отдельном браузере (Edge)**: перена�
    ```
    Скрипт переключит режим на `call` и наберёт номер в Zoom Phone.
 
-Остальные команды: `python maya.py status`, `python maya.py --help`.
+Остальные команды: `python maya.py status`, `python maya.py stop` (закрыть Voicemeeter и освободить микрофон), `python maya.py --help`.
+
+> Zoom держи **настольным приложением**, не веб-версией в Edge: Windows назначает звук целой программе, и Zoom с Maya в одном браузере услышали бы друг друга по кругу.
 
 ## Настройки
 

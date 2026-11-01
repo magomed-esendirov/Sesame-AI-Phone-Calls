@@ -76,6 +76,7 @@ python maya.py setup
 | Maya не слышит абонента | Динамик Zoom = `Voicemeeter Input`; микрофон Edge = `Voicemeeter Out B1`; `python maya.py status` → у Zoom есть `B1` |
 | Абонент не слышит Maya | Вывод Edge = `Voicemeeter AUX Input`; микрофон Zoom = `Voicemeeter Out B2`; у Maya есть `B2` |
 | Ты ничего не слышишь | В Voicemeeter у A1 выбраны твои динамики (`python maya.py setup`) |
+| Другие программы (Claude, Telegram) не слышат микрофон | `python maya.py setup` подключает микрофон через MME (общий режим). Срочно освободить устройства: `python maya.py stop` |
 | Пропал весь системный звук | Устройство вывода Windows по умолчанию — снова твои динамики, не `Voicemeeter VAIO3 Input` |
 | Треск / заикание | Voicemeeter → Menu → System Settings → увеличь Buffering WDM до 1024 |
 | Maya перебивает или молчит | Подними громкость полосы ZOOM в Voicemeeter (фейдер +3…+6 dB) — телефонный звук тихий |

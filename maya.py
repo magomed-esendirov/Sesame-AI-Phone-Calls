@@ -148,6 +148,9 @@ class Voicemeeter:
         dll.VBVMR_IsParametersDirty.restype = ctypes.c_long
         dll.VBVMR_GetParameterFloat.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_float)]
         dll.VBVMR_GetParameterStringW.argtypes = [ctypes.c_char_p, ctypes.c_wchar_p]
+        desc = [ctypes.c_long, ctypes.POINTER(ctypes.c_long), ctypes.c_wchar_p, ctypes.c_wchar_p]
+        dll.VBVMR_Input_GetDeviceDescW.argtypes = desc
+        dll.VBVMR_Output_GetDeviceDescW.argtypes = desc
         dll.VBVMR_SetParametersW.argtypes = [ctypes.c_wchar_p]
         dll.VBVMR_SetParametersW.restype = ctypes.c_long
         self.dll = dll
@@ -192,6 +195,27 @@ class Voicemeeter:
         if self.dll.VBVMR_GetParameterFloat(name.encode("ascii"), ctypes.byref(val)) != 0:
             raise RuntimeError(f"Не удалось прочитать {name}")
         return val.value
+
+    DEV_MME, DEV_WDM = 1, 3
+
+    def devices(self, output: bool) -> list[tuple[int, str]]:
+        """Список (тип драйвера, имя) физических устройств, которые видит Voicemeeter."""
+        count = (self.dll.VBVMR_Output_GetDeviceNumber if output else self.dll.VBVMR_Input_GetDeviceNumber)()
+        get = self.dll.VBVMR_Output_GetDeviceDescW if output else self.dll.VBVMR_Input_GetDeviceDescW
+        found = []
+        for i in range(max(count, 0)):
+            kind = ctypes.c_long()
+            name, hwid = ctypes.create_unicode_buffer(512), ctypes.create_unicode_buffer(512)
+            if get(i, ctypes.byref(kind), name, hwid) == 0:
+                found.append((kind.value, name.value))
+        return found
+
+    def find_mme(self, wanted: str, output: bool) -> str | None:
+        """MME обрезает имена до 31 символа — ищем устройство по началу имени."""
+        for kind, name in self.devices(output):
+            if kind == self.DEV_MME and name and (wanted.startswith(name) or name.startswith(wanted[:31])):
+                return name
+        return None
 
     def get_str(self, name: str) -> str:
         self.sync()
@@ -238,12 +262,26 @@ def beep(mode: str) -> None:
         pass
 
 
+def hw_device(vm: Voicemeeter, wanted: str, output: bool) -> str:
+    """Параметр подключения физического устройства.
+
+    Используем MME: в нём устройство всегда в общем режиме, и микрофон/динамики
+    остаются доступны другим программам (Claude, Telegram, браузер). WDM в Voicemeeter
+    может захватить устройство монопольно.
+    """
+    q = lambda s: s.replace('"', "")
+    mme = vm.find_mme(wanted, output)
+    if mme:
+        return f'device.mme="{q(mme)}"'
+    print(f"Внимание: MME-версия «{wanted}» не найдена, подключаю через WDM.")
+    return f'device.wdm="{q(wanted)}"'
+
+
 def cmd_setup(cfg: dict) -> None:
     with Voicemeeter(cfg) as vm:
-        q = lambda s: s.replace('"', "")
         vm.run(
-            f'Strip[{MIC}].device.wdm="{q(cfg["mic"])}";'
-            f'Bus[0].device.wdm="{q(cfg["speakers"])}";'
+            f'Strip[{MIC}].{hw_device(vm, cfg["mic"], output=False)};'
+            f'Bus[0].{hw_device(vm, cfg["speakers"], output=True)};'
             f'Strip[{MIC}].Label="MIC (you)";'
             f'Strip[{ZOOM}].Label="ZOOM (callee)";'
             f'Strip[{MAYA}].Label="MAYA";'
@@ -295,6 +333,12 @@ def cmd_status(cfg: dict) -> None:
     print("  (A1 = ты, B1 = Maya, B2 = абонент)")
 
 
+def cmd_stop(cfg: dict) -> None:
+    with Voicemeeter(cfg) as vm:
+        vm.run("Command.Shutdown=1;")
+    print("Voicemeeter закрыт, микрофон и динамики свободны.")
+
+
 def cmd_dial(cfg: dict, number: str) -> None:
     clean = re.sub(r"[\s\-().]", "", number)
     if not re.fullmatch(r"\+?\d{3,15}", clean):
@@ -338,6 +382,7 @@ def main() -> None:
     d.add_argument("number")
     sub.add_parser("open", help="открыть Sesame в Edge")
     sub.add_parser("hotkeys", help="горячие клавиши")
+    sub.add_parser("stop", help="закрыть Voicemeeter и освободить устройства")
     args = p.parse_args()
     cfg = load_config()
 
@@ -354,6 +399,8 @@ def main() -> None:
         cmd_open(cfg)
     elif args.cmd == "hotkeys":
         cmd_hotkeys(cfg)
+    elif args.cmd == "stop":
+        cmd_stop(cfg)
 
 
 if __name__ == "__main__":
