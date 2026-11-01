@@ -17,6 +17,11 @@ Microsoft Edge, Python 3.10+.
    тогда поправь имена в `config.json`.
 5. **Не меняй устройства по умолчанию в Windows** — динамики и микрофон остаются прежними.
    Виртуальные устройства назначаются только Zoom и Edge.
+   Установщик Voicemeeter 2.1 сам делает устройством по умолчанию `Voicemeeter VAIO3 Input`,
+   и системный звук пропадает. Верни свои динамики: **Параметры → Система → Звук → Вывод**.
+
+Через winget установка ставится одной командой:
+`winget install --id VB-Audio.Voicemeeter.Banana --exact`.
 
 ## 2. Скрипт
 
@@ -71,6 +76,7 @@ python maya.py setup
 | Maya не слышит абонента | Динамик Zoom = `Voicemeeter Input`; микрофон Edge = `Voicemeeter Out B1`; `python maya.py status` → у Zoom есть `B1` |
 | Абонент не слышит Maya | Вывод Edge = `Voicemeeter AUX Input`; микрофон Zoom = `Voicemeeter Out B2`; у Maya есть `B2` |
 | Ты ничего не слышишь | В Voicemeeter у A1 выбраны твои динамики (`python maya.py setup`) |
+| Пропал весь системный звук | Устройство вывода Windows по умолчанию — снова твои динамики, не `Voicemeeter VAIO3 Input` |
 | Треск / заикание | Voicemeeter → Menu → System Settings → увеличь Buffering WDM до 1024 |
 | Maya перебивает или молчит | Подними громкость полосы ZOOM в Voicemeeter (фейдер +3…+6 dB) — телефонный звук тихий |
 | Эхо у абонента | Убедись, что твой микрофон не идёт в B2 в режиме `call` (`status`) |

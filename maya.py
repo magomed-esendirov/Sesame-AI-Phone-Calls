@@ -147,6 +147,7 @@ class Voicemeeter:
         dll.VBVMR_GetVoicemeeterType.argtypes = [ctypes.POINTER(ctypes.c_long)]
         dll.VBVMR_IsParametersDirty.restype = ctypes.c_long
         dll.VBVMR_GetParameterFloat.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_float)]
+        dll.VBVMR_GetParameterStringW.argtypes = [ctypes.c_char_p, ctypes.c_wchar_p]
         dll.VBVMR_SetParametersW.argtypes = [ctypes.c_wchar_p]
         dll.VBVMR_SetParametersW.restype = ctypes.c_long
         self.dll = dll
@@ -159,7 +160,7 @@ class Voicemeeter:
             print("Запускаю Voicemeeter Banana…")
             self.dll.VBVMR_RunVoicemeeter(self.BANANA)
         kind = ctypes.c_long(0)
-        for _ in range(50):
+        for _ in range(150):  # первый запуск Voicemeeter может занимать 10–20 секунд
             if self.dll.VBVMR_GetVoicemeeterType(ctypes.byref(kind)) == 0:
                 break
             time.sleep(0.2)
@@ -192,13 +193,37 @@ class Voicemeeter:
             raise RuntimeError(f"Не удалось прочитать {name}")
         return val.value
 
+    def get_str(self, name: str) -> str:
+        self.sync()
+        buf = ctypes.create_unicode_buffer(512)
+        if self.dll.VBVMR_GetParameterStringW(name.encode("ascii"), buf) != 0:
+            return "?"
+        return buf.value
 
-def apply_mode(vm: Voicemeeter, mode: str) -> None:
+
+def read_routes(vm: Voicemeeter) -> dict[int, dict[str, int]]:
+    return {s: {b: int(vm.get(f"Strip[{s}].{b}")) for b in (*BUSES, "Mute")} for s in STRIP_NAMES}
+
+
+def current_mode(state: dict[int, dict[str, int]]) -> str | None:
+    return next((m for m, r in MODES.items() if all(state[s] == r[s] for s in STRIP_NAMES)), None)
+
+
+def apply_mode(vm: Voicemeeter, mode: str, verify: bool = False) -> None:
     parts = []
     for strip in (MIC, HW2, HW3, ZOOM, MAYA):
         r = MODES[mode].get(strip, route())
         parts += [f"Strip[{strip}].{k}={int(v)}" for k, v in r.items()]
-    vm.run(";".join(parts) + ";")
+    script = ";".join(parts) + ";"
+    vm.run(script)
+    if verify:  # после перезапуска аудиодвижка команды могут теряться — повторяем до применения
+        for _ in range(10):
+            time.sleep(0.5)
+            if current_mode(read_routes(vm)) == mode:
+                break
+            vm.run(script)
+        else:
+            print(f"Внимание: режим {mode} не подтвердился, проверь `python maya.py status`.")
     beep(mode)
     print(f"Режим: {mode.upper()} — {MODE_HELP[mode]}")
 
@@ -223,8 +248,8 @@ def cmd_setup(cfg: dict) -> None:
             f'Strip[{ZOOM}].Label="ZOOM (callee)";'
             f'Strip[{MAYA}].Label="MAYA";'
         )
-        time.sleep(1.0)  # смена устройств перезапускает аудиодвижок
-        apply_mode(vm, "off")
+        time.sleep(3.0)  # смена устройств перезапускает аудиодвижок
+        apply_mode(vm, "off", verify=True)
     print("Voicemeeter настроен: HW1 = микрофон, A1 = динамики, полосы подписаны.")
     setup_app_routing(cfg)
 
@@ -257,10 +282,12 @@ def setup_app_routing(cfg: dict) -> None:
 
 def cmd_status(cfg: dict) -> None:
     with Voicemeeter(cfg) as vm:
-        state = {s: {b: int(vm.get(f"Strip[{s}].{b}")) for b in (*BUSES, "Mute")} for s in STRIP_NAMES}
-    current = next((m for m, r in MODES.items()
-                    if all(state[s] == r[s] for s in STRIP_NAMES)), "нестандартный")
-    print(f"Текущий режим: {current}")
+        state = read_routes(vm)
+        mic_dev = vm.get_str(f"Strip[{MIC}].device.name")
+        a1_dev = vm.get_str("Bus[0].device.name")
+    print(f"Текущий режим: {current_mode(state) or 'нестандартный'}")
+    print(f"  Микрофон (HW1): {mic_dev or '— не выбран'}")
+    print(f"  Динамики (A1):  {a1_dev or '— не выбраны'}")
     for s, name in STRIP_NAMES.items():
         on = [b for b in BUSES if state[s][b]]
         mute = "  [MUTE]" if state[s]["Mute"] else ""
