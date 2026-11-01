@@ -386,12 +386,15 @@ def check_apps(cfg: dict) -> None:
         if not got:
             print(f"    {labels[key]:<16} — нет активной сессии")
             continue
-        ok = want in got
+        # Приложения держат и старые неактивные сессии, поэтому «лишние» устройства — не ошибка,
+        # а вот отсутствие нужного — ошибка.
         extra = sorted(got - {want})
-        mark = "OK " if ok and not extra else "!! "
-        line = f"    {mark}{labels[key]:<16} {', '.join(sorted(got))}"
-        if not ok or extra:
-            line += f"   (нужно: {want})"
+        if want in got:
+            line = f"    OK {labels[key]:<16} {want}"
+            if extra:
+                line += f"   (ещё сессии: {', '.join(extra)})"
+        else:
+            line = f"    !! {labels[key]:<16} {', '.join(sorted(got))}   (нужно: {want})"
         print(line)
 
 
