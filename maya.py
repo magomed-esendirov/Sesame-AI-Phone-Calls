@@ -41,6 +41,12 @@ import sys
 import time
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):  # кириллица в консоли Windows (cp1252 при перенаправлении)
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.json"
 
