@@ -459,6 +459,13 @@ class Controller:
             print(f"  ↳ {reason}")
 
     def tick(self) -> None:
+        now = time.monotonic()
+        if now - getattr(self, "_synced", 0) > 2:  # режим мог поменять кто-то снаружи (CLI, Voicemeeter)
+            self._synced = now
+            with self.lock:
+                actual = current_mode(read_routes(self.vm))
+                if actual and actual != self.mode:
+                    self.mode, self.last_activity = actual, now
         with self.lock:
             mode = self.mode
             zoom = self.vm.level_db(ZOOM) > self.threshold
@@ -481,7 +488,22 @@ class Controller:
                  "Ctrl+Alt+T: " + ("разговор снова у Maya" if self.mode == "takeover" else "ты в разговоре"))
 
 
+def disable_quick_edit() -> None:
+    """Клик мышью в консоли Windows включает выделение (QuickEdit) и замораживает программу
+    на первом же print — автопереключение зависает. Отключаем QuickEdit для этого окна."""
+    try:
+        k32 = ctypes.windll.kernel32
+        handle = k32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if k32.GetConsoleMode(handle, ctypes.byref(mode)):
+            ENABLE_QUICK_EDIT, ENABLE_EXTENDED_FLAGS = 0x40, 0x80
+            k32.SetConsoleMode(handle, (mode.value & ~ENABLE_QUICK_EDIT) | ENABLE_EXTENDED_FLAGS)
+    except Exception:
+        pass
+
+
 def cmd_start(cfg: dict, auto: bool = True) -> None:
+    disable_quick_edit()
     try:
         import keyboard
     except ImportError:
