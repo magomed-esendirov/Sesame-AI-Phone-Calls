@@ -64,8 +64,9 @@ python maya.py setup
 
 ## 5. Проверка без звонка
 
-1. `python maya.py brief` — скажи Maya «привет». Она должна ответить, ты её слышишь.
-2. `python maya.py call` — Maya больше не слышит тебя (микрофон отключён от всех линий).
+1. Запусти `start.bat` — режим **Компьютер**. Скажи Maya «привет»: она должна ответить.
+2. `Ctrl+Alt+M` — режим **Телефон**: Maya больше не слышит тебя. `Ctrl+Alt+M` ещё раз — обратно.
+   Во время звонка `Ctrl+Alt+T` — перехват: абонент слышит тебя, Maya молчит.
 3. В Zoom: **Настройки → Звук → Проверить микрофон** — пока Maya говорит, индикатор должен двигаться.
 4. Позвони на свой мобильный: `python maya.py dial +1XXXXXXXXXX`. Ответь и поговори с Maya.
 
@@ -73,6 +74,7 @@ python maya.py setup
 
 | Симптом | Что проверить |
 |---|---|
+| Maya не слышит тебя | Запущен ли `start.bat`? `python maya.py status` → режим `pc` |
 | Maya не слышит абонента | Динамик Zoom = `Voicemeeter Input`; микрофон Edge = `Voicemeeter Out B1`; `python maya.py status` → у Zoom есть `B1` |
 | Абонент не слышит Maya | Вывод Edge = `Voicemeeter AUX Input`; микрофон Zoom = `Voicemeeter Out B2`; у Maya есть `B2` |
 | Ты ничего не слышишь | В Voicemeeter у A1 выбраны твои динамики (`python maya.py setup`) |
@@ -80,5 +82,5 @@ python maya.py setup
 | Пропал весь системный звук | Устройство вывода Windows по умолчанию — снова твои динамики, не `Voicemeeter VAIO3 Input` |
 | Треск / заикание | Voicemeeter → Menu → System Settings → увеличь Buffering WDM до 1024 |
 | Maya перебивает или молчит | Подними громкость полосы ZOOM в Voicemeeter (фейдер +3…+6 dB) — телефонный звук тихий |
-| Эхо у абонента | Убедись, что твой микрофон не идёт в B2 в режиме `call` (`status`) |
+| Эхо у абонента | Убедись, что твой микрофон не идёт в B2 в режиме `phone` (`status`) |
 | `zoomphonecall://` не открывает Zoom | Zoom → Настройки → Телефон → сделай Zoom приложением по умолчанию для звонков |

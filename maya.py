@@ -17,15 +17,16 @@ Maya Phone Bridge — звонки по телефону голосом Maya (Se
 
 Команды:
     python maya.py setup            разовая настройка Voicemeeter (+ маршрутизация Edge/Zoom)
-    python maya.py brief            инструктаж: ты говоришь с Maya, звонок её не слышит
-    python maya.py call             звонок: Maya <-> абонент, ты слушаешь
-    python maya.py takeover         перехват: ты говоришь с абонентом, Maya молчит, но слышит
-    python maya.py whisper          подсказка: звонок + Maya слышит тебя, абонент — нет
+    python maya.py start            ЗАПУСК: автопереключение компьютер/телефон, Ctrl+Alt+M, Ctrl+Alt+T
+    python maya.py pc               Maya слышит тебя (за компьютером)
+    python maya.py phone            Maya слышит абонента в Zoom и говорит в звонок
+    python maya.py takeover         перехват: ты говоришь с абонентом, Maya молчит и слушает
     python maya.py off              всё разведено, ничего никуда не уходит
     python maya.py status           показать текущую маршрутизацию
-    python maya.py dial +15551234567  режим call + набор номера в Zoom Phone
+    python maya.py dial +15551234567  режим phone + набор номера в Zoom Phone
     python maya.py open             открыть Sesame в Edge
-    python maya.py hotkeys          горячие клавиши Ctrl+Alt+1..5
+    python maya.py levels [сек]     живые уровни: микрофон / Zoom / Maya (диагностика)
+    python maya.py stop             закрыть Voicemeeter и освободить устройства
 """
 
 from __future__ import annotations
@@ -33,7 +34,9 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import math
 import os
+import threading
 import re
 import shutil
 import subprocess
@@ -67,6 +70,9 @@ DEFAULT_CONFIG = {
     "vm_zoom_mic": "Voicemeeter Out B2",
     # NirSoft SoundVolumeView (необязательно) — для автоматической маршрутизации по приложениям
     "soundvolumeview": r"tools\SoundVolumeView.exe",
+    # Автопереключение (start): порог «есть звук» и сколько секунд тишины = конец звонка
+    "auto_threshold_db": -45,
+    "auto_hold_seconds": 20,
 }
 
 # Индексы Voicemeeter Banana
@@ -89,34 +95,28 @@ MODES: dict[str, dict[int, dict]] = {
         ZOOM: route(A1=1),
         MAYA: route(A1=1),
     },
-    "brief": {
+    "pc": {
         MIC: route(B1=1),          # Maya слышит тебя
-        ZOOM: route(A1=1),         # звонок (если идёт) слышишь только ты
-        MAYA: route(A1=1),         # ты слышишь Maya, абонент — нет
+        ZOOM: route(A1=1),         # Zoom слышишь только ты
+        MAYA: route(A1=1),         # ты слышишь Maya
     },
-    "call": {
+    "phone": {
         MIC: route(),              # твой микрофон никуда не идёт
         ZOOM: route(A1=1, B1=1),   # Maya и ты слышите абонента
         MAYA: route(A1=1, B2=1),   # абонент и ты слышите Maya
     },
     "takeover": {
         MIC: route(B1=1, B2=1),    # абонент слышит тебя, Maya тоже (держит контекст)
-        ZOOM: route(A1=1, B1=1),
-        MAYA: route(Mute=1),       # Maya заглушена
-    },
-    "whisper": {
-        MIC: route(B1=1),          # Maya слышит тебя, абонент — нет
-        ZOOM: route(A1=1, B1=1),
-        MAYA: route(A1=1, B2=1),
+        ZOOM: route(A1=1, B1=1),   # ты и Maya слышите абонента
+        MAYA: route(Mute=1),       # Maya замолчала
     },
 }
 
 MODE_HELP = {
     "off": "всё разведено",
-    "brief": "инструктаж — говоришь с Maya",
-    "call": "звонок — Maya говорит с абонентом",
-    "takeover": "перехват — говоришь ты, Maya молчит",
-    "whisper": "подсказка — Maya слышит тебя, абонент нет",
+    "pc": "КОМПЬЮТЕР — Maya слышит тебя",
+    "phone": "ТЕЛЕФОН — Maya слышит абонента и говорит в звонок",
+    "takeover": "ПЕРЕХВАТ — говоришь ты, Maya молчит и слушает",
 }
 
 
@@ -148,6 +148,7 @@ class Voicemeeter:
         dll.VBVMR_IsParametersDirty.restype = ctypes.c_long
         dll.VBVMR_GetParameterFloat.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_float)]
         dll.VBVMR_GetParameterStringW.argtypes = [ctypes.c_char_p, ctypes.c_wchar_p]
+        dll.VBVMR_GetLevel.argtypes = [ctypes.c_long, ctypes.c_long, ctypes.POINTER(ctypes.c_float)]
         desc = [ctypes.c_long, ctypes.POINTER(ctypes.c_long), ctypes.c_wchar_p, ctypes.c_wchar_p]
         dll.VBVMR_Input_GetDeviceDescW.argtypes = desc
         dll.VBVMR_Output_GetDeviceDescW.argtypes = desc
@@ -195,6 +196,18 @@ class Voicemeeter:
         if self.dll.VBVMR_GetParameterFloat(name.encode("ascii"), ctypes.byref(val)) != 0:
             raise RuntimeError(f"Не удалось прочитать {name}")
         return val.value
+
+    # Каналы входов Banana для измерения уровня (pre-fader): HW1 = 0-1, VAIO = 6-13, AUX = 14-21
+    LEVEL_CHANNELS = {MIC: (0, 1), ZOOM: (6, 7), MAYA: (14, 15)}
+
+    def level_db(self, strip: int) -> float:
+        """Пиковый уровень полосы до фейдера, дБ (не зависит от маршрутизации и mute)."""
+        peak = 0.0
+        val = ctypes.c_float()
+        for ch in self.LEVEL_CHANNELS[strip]:
+            if self.dll.VBVMR_GetLevel(0, ch, ctypes.byref(val)) == 0:
+                peak = max(peak, abs(val.value))
+        return 20 * math.log10(peak) if peak > 1e-6 else -120.0
 
     DEV_MME, DEV_WDM = 1, 3
 
@@ -249,14 +262,14 @@ def apply_mode(vm: Voicemeeter, mode: str, verify: bool = False) -> None:
         else:
             print(f"Внимание: режим {mode} не подтвердился, проверь `python maya.py status`.")
     beep(mode)
-    print(f"Режим: {mode.upper()} — {MODE_HELP[mode]}")
+    print(f"Режим: {MODE_HELP[mode]}", flush=True)
 
 
 def beep(mode: str) -> None:
     """Короткий сигнал в системные динамики (не попадает в звонок)."""
     try:
         import winsound
-        tone = {"off": 400, "brief": 600, "call": 900, "takeover": 1200, "whisper": 750}[mode]
+        tone = {"off": 400, "pc": 600, "phone": 900, "takeover": 1200}[mode]
         winsound.Beep(tone, 120)
     except Exception:
         pass
@@ -287,7 +300,7 @@ def cmd_setup(cfg: dict) -> None:
             f'Strip[{MAYA}].Label="MAYA";'
         )
         time.sleep(3.0)  # смена устройств перезапускает аудиодвижок
-        apply_mode(vm, "off", verify=True)
+        apply_mode(vm, "pc", verify=True)
     print("Voicemeeter настроен: HW1 = микрофон, A1 = динамики, полосы подписаны.")
     setup_app_routing(cfg)
 
@@ -344,7 +357,7 @@ def cmd_dial(cfg: dict, number: str) -> None:
     if not re.fullmatch(r"\+?\d{3,15}", clean):
         sys.exit(f"Странный номер: {number}")
     with Voicemeeter(cfg) as vm:
-        apply_mode(vm, "call")
+        apply_mode(vm, "phone")
     print(f"Набираю {clean} в Zoom Phone…")
     os.startfile(f"zoomphonecall://{clean}")
 
@@ -353,22 +366,93 @@ def cmd_open(cfg: dict) -> None:
     os.startfile("microsoft-edge:" + cfg["sesame_url"])
 
 
-def cmd_hotkeys(cfg: dict) -> None:
+class Controller:
+    """Текущий режим + автопереключение по звуку из Zoom.
+
+    Авто: в режиме pc появился звук из Zoom (гудки, абонент) → phone.
+    В phone/takeover тишина со всех сторон дольше hold секунд → pc.
+    Режим off авто не трогает.
+    """
+
+    def __init__(self, vm: Voicemeeter, cfg: dict, auto: bool):
+        self.vm, self.auto = vm, auto
+        self.threshold = float(cfg.get("auto_threshold_db", -45))
+        self.hold = float(cfg.get("auto_hold_seconds", 20))
+        self.lock = threading.Lock()
+        self.mode = current_mode(read_routes(vm)) or "pc"
+        self.last_activity = time.monotonic()
+
+    def set(self, mode: str, reason: str = "") -> None:
+        with self.lock:
+            apply_mode(self.vm, mode)
+            self.mode = mode
+            self.last_activity = time.monotonic()
+        if reason:
+            print(f"  ↳ {reason}")
+
+    def tick(self) -> None:
+        with self.lock:
+            mode = self.mode
+            zoom = self.vm.level_db(ZOOM) > self.threshold
+            maya = self.vm.level_db(MAYA) > self.threshold
+            mic = self.vm.level_db(MIC) > self.threshold
+        now = time.monotonic()
+        if mode == "pc" and zoom:
+            self.set("phone", "в Zoom появился звук — Maya переключилась на звонок")
+        elif mode in ("phone", "takeover"):
+            if zoom or maya or (mode == "takeover" and mic):
+                self.last_activity = now
+            elif now - self.last_activity > self.hold:
+                self.set("pc", f"{int(self.hold)} с тишины — звонок окончен, Maya снова слышит тебя")
+
+    def toggle(self) -> None:
+        self.set("phone" if self.mode == "pc" else "pc", "переключено вручную (Ctrl+Alt+M)")
+
+    def takeover(self) -> None:
+        self.set("phone" if self.mode == "takeover" else "takeover",
+                 "Ctrl+Alt+T: " + ("разговор снова у Maya" if self.mode == "takeover" else "ты в разговоре"))
+
+
+def cmd_start(cfg: dict, auto: bool = True) -> None:
     try:
         import keyboard
     except ImportError:
-        sys.exit("Нужен пакет keyboard: pip install keyboard")
-    keys = {"ctrl+alt+1": "brief", "ctrl+alt+2": "call", "ctrl+alt+3": "takeover",
-            "ctrl+alt+4": "whisper", "ctrl+alt+0": "off"}
+        keyboard = None
+        print("(Ctrl+Alt+M недоступна: pip install keyboard)")
     with Voicemeeter(cfg) as vm:
-        for combo, mode in keys.items():
-            keyboard.add_hotkey(combo, apply_mode, args=(vm, mode))
-            print(f"  {combo:<11} {mode:<9} {MODE_HELP[mode]}")
-        print("Горячие клавиши активны. Ctrl+C — выход.")
+        ctl = Controller(vm, cfg, auto)
+        if ctl.mode != "pc":
+            ctl.set("pc")
+        if keyboard:
+            keyboard.add_hotkey("ctrl+alt+m", ctl.toggle)
+            keyboard.add_hotkey("ctrl+alt+t", ctl.takeover)
+            print("Ctrl+Alt+M — переключить компьютер / телефон вручную")
+            print("Ctrl+Alt+T — перехват: ты говоришь с абонентом, Maya молчит (ещё раз — вернуть Maya)")
+        if auto:
+            print(f"Авто: звук в Zoom → ТЕЛЕФОН, {int(ctl.hold)} с тишины → КОМПЬЮТЕР")
+        print("Не закрывай это окно. Ctrl+C — выход.", flush=True)
         try:
-            keyboard.wait()
+            while True:
+                if auto:
+                    ctl.tick()
+                time.sleep(0.1)
         except KeyboardInterrupt:
             pass
+
+
+def cmd_levels(cfg: dict, seconds: float) -> None:
+    """Живые уровни — для диагностики: кто реально звучит."""
+    with Voicemeeter(cfg) as vm:
+        print("дБ:   микрофон |   Zoom   |   Maya     (тишина ≈ -120, речь ≈ -30…-10)")
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            peaks = {s: -120.0 for s in (MIC, ZOOM, MAYA)}
+            t = time.monotonic() + 1.0
+            while time.monotonic() < t:
+                for s in peaks:
+                    peaks[s] = max(peaks[s], vm.level_db(s))
+                time.sleep(0.05)
+            print(f"     {peaks[MIC]:8.1f} | {peaks[ZOOM]:8.1f} | {peaks[MAYA]:8.1f}", flush=True)
 
 
 def main() -> None:
@@ -378,10 +462,13 @@ def main() -> None:
         sub.add_parser(m, help=MODE_HELP[m])
     sub.add_parser("setup", help="разовая настройка")
     sub.add_parser("status", help="текущая маршрутизация")
-    d = sub.add_parser("dial", help="режим call + набор номера")
+    d = sub.add_parser("dial", help="режим phone + набор номера")
     d.add_argument("number")
     sub.add_parser("open", help="открыть Sesame в Edge")
-    sub.add_parser("hotkeys", help="горячие клавиши")
+    h = sub.add_parser("start", help="запуск: автопереключение компьютер/телефон + Ctrl+Alt+M")
+    h.add_argument("--no-auto", action="store_true", help="без автопереключения")
+    lv = sub.add_parser("levels", help="живые уровни сигнала (диагностика)")
+    lv.add_argument("seconds", nargs="?", type=float, default=15)
     sub.add_parser("stop", help="закрыть Voicemeeter и освободить устройства")
     args = p.parse_args()
     cfg = load_config()
@@ -397,8 +484,10 @@ def main() -> None:
         cmd_dial(cfg, args.number)
     elif args.cmd == "open":
         cmd_open(cfg)
-    elif args.cmd == "hotkeys":
-        cmd_hotkeys(cfg)
+    elif args.cmd == "start":
+        cmd_start(cfg, auto=not args.no_auto)
+    elif args.cmd == "levels":
+        cmd_levels(cfg, args.seconds)
     elif args.cmd == "stop":
         cmd_stop(cfg)
 

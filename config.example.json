@@ -9,5 +9,7 @@
   "vm_maya_out": "Voicemeeter AUX Input",
   "vm_maya_mic": "Voicemeeter Out B1",
   "vm_zoom_mic": "Voicemeeter Out B2",
-  "soundvolumeview": "tools\\SoundVolumeView.exe"
+  "soundvolumeview": "tools\\SoundVolumeView.exe",
+  "auto_threshold_db": -45,
+  "auto_hold_seconds": 20
 }
