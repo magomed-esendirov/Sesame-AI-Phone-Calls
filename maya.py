@@ -172,6 +172,7 @@ class Voicemeeter:
             sys.exit("Voicemeeter не ответил. Запусти Voicemeeter Banana вручную и повтори.")
         if kind.value != self.BANANA:
             sys.exit("Нужен именно Voicemeeter Banana (запущена другая редакция).")
+        time.sleep(0.3)  # сразу после входа параметры ещё не подтянуты — иначе читаются заводские
         self.sync()
         return self
 
