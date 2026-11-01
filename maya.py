@@ -348,7 +348,16 @@ def app_devices(cfg: dict) -> dict[tuple[str, str], set[str]] | None:
         if out.exists() and out.stat().st_size:
             break
         time.sleep(0.1)
-    rows = list(csv.DictReader(out.read_text(encoding="mbcs", errors="replace").splitlines()))
+    raw = out.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw.decode("utf-16", errors="replace")
+    elif raw.startswith(b"\xef\xbb\xbf"):
+        text = raw.decode("utf-8-sig", errors="replace")
+    else:
+        text = raw.decode("mbcs", errors="replace")
+    rows = list(csv.DictReader(text.splitlines()))
+    if rows and "Item ID" not in rows[0]:  # другой набор колонок — диагностика недоступна
+        return None
     names = {r["Item ID"]: r["Name"] for r in rows if r.get("Type") == "Device"}
     exes = {cfg["maya_browser_exe"].lower(), cfg["zoom_exe"].lower()}
     result: dict[tuple[str, str], set[str]] = {}
