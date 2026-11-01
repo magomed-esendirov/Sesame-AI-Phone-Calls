@@ -56,6 +56,7 @@ Maya живёт в **отдельном браузере (Edge)**: перена�
    pip install keyboard
    python maya.py hotkeys
    ```
+   Или просто двойной клик по `hotkeys.bat`.
 4. `Ctrl+Alt+1` — скажи Maya, кому звоним и зачем. Затем:
    ```powershell
    python maya.py dial +15551234567
