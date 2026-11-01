@@ -1,86 +1,91 @@
-# Настройка на Windows
+# Windows setup
 
-Один раз, примерно 15 минут. Нужны: Windows 10/11, Zoom с подключённым Zoom Phone,
-Microsoft Edge, Python 3.10+.
+Once, about 15 minutes. You need Windows 10/11, Microsoft Edge, Python 3.10+ and an app for
+calls (tested with Zoom Phone).
 
 ## 1. Voicemeeter Banana
 
-1. Скачай с официального сайта: <https://vb-audio.com/Voicemeeter/banana.htm>
-   (бесплатно, donationware).
-2. Запусти установщик **от имени администратора**, подтверди установку драйвера.
-3. **Перезагрузи компьютер** — без этого виртуальные устройства не появятся.
-4. После перезагрузки в «Звук» появятся устройства:
-   - воспроизведение: `Voicemeeter Input`, `Voicemeeter AUX Input`
-   - запись: `Voicemeeter Out B1`, `Voicemeeter Out B2`
+1. Download it from the official site: <https://vb-audio.com/Voicemeeter/banana.htm>
+   (free, donationware), or with winget:
+   `winget install --id VB-Audio.Voicemeeter.Banana --exact`.
+2. Run the installer **as administrator** and confirm the driver installation.
+3. **Restart the computer** if the virtual devices don't show up.
+4. In Sound settings you should now have:
+   - playback: `Voicemeeter Input`, `Voicemeeter AUX Input`
+   - recording: `Voicemeeter Out B1`, `Voicemeeter Out B2`
 
-   В старых версиях они называются `VoiceMeeter Output` / `VoiceMeeter Aux Output` —
-   тогда поправь имена в `config.json`.
-5. **Не меняй устройства по умолчанию в Windows** — динамики и микрофон остаются прежними.
-   Виртуальные устройства назначаются только Zoom и Edge.
-   Установщик Voicemeeter 2.1 сам делает устройством по умолчанию `Voicemeeter VAIO3 Input`,
-   и системный звук пропадает. Верни свои динамики: **Параметры → Система → Звук → Вывод**.
+   Older versions call them `VoiceMeeter Output` / `VoiceMeeter Aux Output` — then fix the
+   names in `config.json`.
+5. **Don't change the Windows default devices** — your speakers and mic stay the default.
+   Virtual devices are assigned only to Edge and the call app.
+   The Voicemeeter 2.1 installer makes `Voicemeeter VAIO3 Input` the default output, which
+   silences all system sound. Switch back to your speakers:
+   **Settings → System → Sound → Output**.
 
-Через winget установка ставится одной командой:
-`winget install --id VB-Audio.Voicemeeter.Banana --exact`.
-
-## 2. Скрипт
+## 2. The script
 
 ```powershell
 git clone https://github.com/magomed-esendirov/Sesame-AI-Phone-Calls.git
 cd Sesame-AI-Phone-Calls
 copy config.example.json config.json
 python maya.py setup
+pip install keyboard
 ```
 
-`setup` подключает микрофон и динамики к Voicemeeter, подписывает полосы и включает
-режим `off`.
+`setup` connects your mic and speakers to Voicemeeter (in shared MME mode, so other apps keep
+the mic), labels the strips and turns on the **PC** mode.
 
-Чтобы `setup` сам назначил устройства для Edge и Zoom, положи
-[SoundVolumeView](https://www.nirsoft.net/utils/sound_volume_view.html) (NirSoft, бесплатно)
-в папку `tools\` и запусти `setup` ещё раз. Без него — шаги 3 и 4 вручную.
+To let `setup` assign Edge's devices automatically, put
+[SoundVolumeView](https://www.nirsoft.net/utils/sound_volume_view.html) (NirSoft, free) into
+the `tools\` folder and run `setup` again. Without it, do step 3.1 by hand.
 
-## 3. Edge — браузер для Maya
+## 3. Edge — Maya's browser
 
-1. **Параметры → Система → Звук → Микшер громкости** (открой Edge, чтобы он появился в списке):
-   - Microsoft Edge → **Устройство вывода**: `Voicemeeter AUX Input`
-   - Microsoft Edge → **Устройство ввода**: `Voicemeeter Out B1`
-2. Открой Sesame в Edge (`python maya.py open`), войди, разреши доступ к микрофону.
-3. Если сайт даёт выбрать микрофон — выбери `Voicemeeter Out B1`.
-   В Edge: `edge://settings/content/microphone`.
+1. **Settings → System → Sound → Volume mixer** (open Edge first so it shows up):
+   - Microsoft Edge → **Output device**: `Voicemeeter AUX Input`
+   - Microsoft Edge → **Input device**: `Voicemeeter Out B1`
+2. In Edge open `edge://settings/content/microphone` and choose `Voicemeeter Out B1`
+   (there may be two entries — "Default" and the device itself; either works).
+3. Open Sesame in Edge (`python maya.py open`), sign in, allow the microphone.
+   If the Sesame tab was already open, reload it (F5) so it picks up the new devices.
 
-Основной браузер (Chrome) остаётся как был.
+Your main browser (Chrome) stays as it is.
 
-## 4. Zoom
+## 4. The call app
 
-**Настройки → Звук**:
+Pick **speaker `Voicemeeter Input`** and **microphone `Voicemeeter Out B2`**. For Zoom,
+**Settings → Audio**:
 
-| Параметр | Значение |
+| Setting | Value |
 |---|---|
-| Динамик | `Voicemeeter Input` |
-| Микрофон | `Voicemeeter Out B2` |
-| Автоматически регулировать громкость микрофона | **выключить** |
-| Подавление фонового шума | **Низкий** (иначе Zoom может «резать» голос Maya) |
-| Отдельное устройство для звонка (рингтон) | твои динамики — чтобы звонок не уходил Maya |
+| Speaker | `Voicemeeter Input` |
+| Microphone | `Voicemeeter Out B2` |
+| Automatically adjust microphone volume | **off** |
+| Background noise suppression | **Low** (otherwise Zoom may cut Maya's voice) |
+| Separate device for ringtone | your speakers — so the ringtone doesn't go to Maya |
 
-## 5. Проверка без звонка
+For other apps see the table in the [README](../README.md#call-apps).
 
-1. Запусти `start.bat` — режим **Компьютер**. Скажи Maya «привет»: она должна ответить.
-2. `Ctrl+Alt+M` — режим **Телефон**: Maya больше не слышит тебя. `Ctrl+Alt+M` ещё раз — обратно.
-   Во время звонка `Ctrl+Alt+T` — перехват: абонент слышит тебя, Maya молчит.
-3. В Zoom: **Настройки → Звук → Проверить микрофон** — пока Maya говорит, индикатор должен двигаться.
-4. Позвони на свой мобильный: `python maya.py dial +1XXXXXXXXXX`. Ответь и поговори с Maya.
+## 5. Test without a call
 
-## Если что-то не так
+1. Run `start.bat` — **PC** mode. Say "hi" to Maya: she should answer.
+2. `Ctrl+Alt+M` — **Phone** mode: Maya no longer hears you. `Ctrl+Alt+M` again — back.
+3. `python maya.py status` — every app line should start with `OK`.
+4. Call your own mobile and answer it **in another room** (otherwise the phone picks up your
+   voice from the room and you get an echo). As soon as the call app produces sound, the mode
+   switches to **Phone** by itself.
 
-| Симптом | Что проверить |
+## Troubleshooting
+
+| Symptom | What to check |
 |---|---|
-| Maya не слышит тебя | Запущен ли `start.bat`? `python maya.py status` → режим `pc` |
-| Maya не слышит абонента | Динамик Zoom = `Voicemeeter Input`; микрофон Edge = `Voicemeeter Out B1`; `python maya.py status` → у Zoom есть `B1` |
-| Абонент не слышит Maya | Вывод Edge = `Voicemeeter AUX Input`; микрофон Zoom = `Voicemeeter Out B2`; у Maya есть `B2` |
-| Ты ничего не слышишь | В Voicemeeter у A1 выбраны твои динамики (`python maya.py setup`) |
-| Другие программы (Claude, Telegram) не слышат микрофон | `python maya.py setup` подключает микрофон через MME (общий режим). Срочно освободить устройства: `python maya.py stop` |
-| Пропал весь системный звук | Устройство вывода Windows по умолчанию — снова твои динамики, не `Voicemeeter VAIO3 Input` |
-| Треск / заикание | Voicemeeter → Menu → System Settings → увеличь Buffering WDM до 1024 |
-| Maya перебивает или молчит | Подними громкость полосы ZOOM в Voicemeeter (фейдер +3…+6 dB) — телефонный звук тихий |
-| Эхо у абонента | Убедись, что твой микрофон не идёт в B2 в режиме `phone` (`status`) |
-| `zoomphonecall://` не открывает Zoom | Zoom → Настройки → Телефон → сделай Zoom приложением по умолчанию для звонков |
+| Maya doesn't hear you | Is `start.bat` running? `python maya.py status` → mode `pc`. Don't click into its console window on older versions — Windows freezes the program while text is selected |
+| Maya doesn't hear anyone at all | `status` → "Maya слушает" must be `Voicemeeter Out B1`. If it isn't, set Edge's mic (step 3) and reload the Sesame tab |
+| Maya doesn't hear the caller | Call app speaker = `Voicemeeter Input`; `status` → the call strip goes to `B1` in Phone mode |
+| The caller hears silence | Edge output = `Voicemeeter AUX Input`; call app mic = `Voicemeeter Out B2` |
+| You hear nothing | Voicemeeter A1 is your speakers (`python maya.py setup`) |
+| Other apps (Claude, Telegram) lost the mic | `python maya.py setup` attaches the mic via MME (shared). To release everything right away: `python maya.py stop` |
+| All system sound is gone | The Windows default output must be your speakers, not `Voicemeeter VAIO3 Input` |
+| Crackling / stuttering | Voicemeeter → Menu → System Settings → raise WDM buffering to 1024 |
+| Maya talks over the caller or stays silent | Raise the CALL strip fader in Voicemeeter (+3…+6 dB) — phone audio is quiet |
+| `zoomphonecall://` doesn't open Zoom | Zoom → Settings → Phone → make Zoom the default calling app, or set `dial_uri` to `tel:{number}` |

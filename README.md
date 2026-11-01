@@ -1,96 +1,152 @@
 # Sesame AI Phone Calls
 
-Телефонные звонки голосом **Maya** из [Sesame AI](https://www.sesame.com/) через **Zoom Phone** на Windows.
+Put **Maya** from [Sesame AI](https://www.sesame.com/) on real calls from a Windows PC: Zoom,
+Microsoft Teams, WhatsApp, Telegram, Skype, SIP softphones — any app that uses the computer's
+audio.
 
-Ты набираешь номер в Zoom, абонент берёт трубку — и разговор ведёт Maya: она слышит
-собеседника и отвечает ему своим ультрареалистичным голосом. Через коннекторы Sesame она
-знает контекст твоей работы (почта, файлы, календарь). Ты при этом слышишь обе стороны и
-режимы переключаются автоматически.
+You dial a number, the other person picks up, and Maya runs the conversation. She hears the
+caller and answers in one of the most realistic AI voices available today. Through Sesame's
+connectors she already knows the context of your work: email, files, calendar. You hear both
+sides and can jump into the call at any moment.
 
-## Как это устроено
+> **What was tested.** Zoom Phone on Windows 11: an outbound call to a mobile number, with
+> Maya handling the whole conversation. Other apps work the same way (you only pick the audio
+> devices in them), but I haven't tested them myself.
 
-У Sesame и Zoom нет API для звука, поэтому они соединяются на уровне аудиоустройств —
-через виртуальный микшер **Voicemeeter Banana**, которым управляет скрипт `maya.py`
-по официальному Remote API.
+## How it works
+
+Neither Sesame nor calling apps expose an audio API, so they are connected at the audio-device
+level through the virtual mixer **Voicemeeter Banana**. A small Python script, `maya.py`,
+drives it via the official Voicemeeter Remote API.
 
 ```
                 ┌──────────────────── Voicemeeter Banana ────────────────────┐
-  Zoom Phone ──►│ "Voicemeeter Input"  ──► полоса ZOOM ──► B1 ──┐            │
-  (динамик)     │                                    └──► A1 ──┼──► твои    │
-                │                                              │    динамики │
-  Maya / Edge ─►│ "Voicemeeter AUX Input" ► полоса MAYA ─► B2 ─┼─┐  (слушаешь│
-  (динамик)     │                                    └──► A1 ──┘ │   обе     │
-                │                                                │   стороны)│
-  Твой микро- ─►│ HW1 ──► полоса MIC ──► B1 (+B2 при перехвате)  │           │
-  фон           └───────────────────────────────┬────────────────┼───────────┘
+  Call app ────►│ "Voicemeeter Input"  ──► CALL strip ───► B1 ──┐            │
+  (Zoom, Teams, │                                    └──► A1 ──┼──► your    │
+   WhatsApp…)   │                                              │    speakers │
+  Maya / Edge ─►│ "Voicemeeter AUX Input" ► MAYA strip ──► B2 ─┼─┐  (you hear│
+  (speaker)     │                                    └──► A1 ──┘ │   both    │
+                │                                                │   sides)  │
+  Your mic ────►│ HW1 ──► MIC strip ──► B1 (+B2 on takeover)     │           │
+                └───────────────────────────────┬────────────────┼───────────┘
                                                 │                │
                          "Voicemeeter Out B1" ◄─┘                └─► "Voicemeeter Out B2"
-                          = микрофон Maya (Edge)                     = микрофон Zoom
+                          = Maya's mic (Edge)                        = call app's mic
 ```
 
-Maya слышит только абонента, абонент — только Maya, поэтому петли и эха нет.
-Maya живёт в **отдельном браузере (Edge)**: перенаправление звука касается только его,
-и YouTube из основного Chrome в звонок не попадёт.
+Maya hears only the caller and the caller hears only Maya, so there is no feedback loop or echo.
+Maya lives in a **separate browser (Edge)**: audio routing only affects that browser, so YouTube
+in your main Chrome never leaks into a call.
 
-## Как пользоваться
+## Usage
 
-Режимов два, и переключаются они **сами**:
+There are two modes, and they switch **automatically**:
 
-| Режим | Когда | Кто кого слышит |
+| Mode | When | Who hears whom |
 |---|---|---|
-| **Компьютер** | нет звонка | Maya слышит тебя — разговариваешь с ней как обычно |
-| **Телефон** | в Zoom пошёл звук (гудки, абонент) | Maya слышит абонента и говорит в звонок; твой микрофон отключён, ты слушаешь обе стороны |
+| **PC** | no call | Maya hears you — talk to her as usual |
+| **Phone** | the call app produces sound (ringback, caller) | Maya hears the caller and speaks into the call; your mic is off, you listen to both sides |
 
-После звонка (20 секунд тишины) — снова **Компьютер**. Вручную переключить: `Ctrl+Alt+M`.
+After the call (20 seconds of silence) it goes back to **PC**. Manual switch: `Ctrl+Alt+M`.
 
-**Перехват — `Ctrl+Alt+T`.** Во время звонка подключаешься сам: абонент слышит тебя, Maya
-замолкает, но продолжает слушать разговор и держит контекст. Ещё раз `Ctrl+Alt+T` — разговор
-снова ведёт Maya.
+**Takeover — `Ctrl+Alt+T`.** Jump into the call yourself: the caller hears you, Maya goes quiet
+but keeps listening, so she keeps the context. Press `Ctrl+Alt+T` again to hand the call back
+to Maya.
 
-## Быстрый старт
+## Quick start
 
-1. Установи Voicemeeter Banana и настрой Zoom и Edge — пошагово в
-   **[docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md)** (≈15 минут, один раз).
-2. Разовая настройка:
+1. Install Voicemeeter Banana and set up Edge and your call app — step by step in
+   **[docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md)** (about 15 minutes, once).
+2. One-time setup:
    ```powershell
    python maya.py setup
    ```
-3. Каждый раз: открой Maya в Edge (`python maya.py open`) и запусти **`start.bat`**
-   (двойной клик). Окно не закрывай — оно переключает режимы.
-4. Скажи Maya, кому звоним и зачем, и набери номер — в Zoom или командой:
+3. Every time: open Maya in Edge (`python maya.py open`) and run **`start.bat`**
+   (double-click). Keep its window open — it switches the modes.
+4. Tell Maya who you're calling and why, then dial — as usual in your app, or:
    ```powershell
    python maya.py dial +15551234567
    ```
 
-Остальные команды: `python maya.py status`, `python maya.py levels` (кто реально звучит),
-`python maya.py stop` (закрыть Voicemeeter и освободить микрофон), `python maya.py --help`.
+Other commands: `python maya.py status` (current mode and which devices Edge and the call app
+actually use), `python maya.py levels` (who is producing sound right now), `python maya.py stop`
+(close Voicemeeter and release the microphone), `python maya.py --help`.
 
-> Zoom держи **настольным приложением**, не веб-версией в Edge: Windows назначает звук целой
-> программе, и Zoom с Maya в одном браузере услышали бы друг друга по кругу.
+> Keep the call app **out of the Edge window where Maya runs**: Windows assigns audio devices
+> per program, so they would hear each other in a loop.
 
-## Настройки
+> The script's console messages are in Russian for now; the commands and the setup above are
+> all you need.
 
-Скопируй `config.example.json` в `config.json` и поправь под себя: имена микрофона и
-динамиков, браузер для Maya, адрес Sesame. `config.json` в git не попадает.
+## Call apps
 
-## Законы и этика
+In any app, pick two devices: **speaker `Voicemeeter Input`** and **microphone
+`Voicemeeter Out B2`**.
 
-Голос Maya почти неотличим от человеческого, поэтому:
+| App | Where | Tested |
+|---|---|---|
+| Zoom / Zoom Phone | Settings → Audio | ✅ |
+| Microsoft Teams | Settings → Devices | — |
+| Telegram Desktop | Settings → Calls | — |
+| WhatsApp, Skype, SIP softphones, others | in the app's settings, or if it has none — Windows Settings → System → Sound → Volume mixer → the app | — |
 
-- **Maya должна представляться ИИ-ассистентом** в начале разговора — пропиши это в инструктаже.
-- В США звонки с искусственным голосом подпадают под TCPA (решение FCC 2024 г.): на мобильные
-  номера нужно предварительное согласие абонента, для маркетинга — письменное. Массовый обзвон
-  незнакомых людей — нельзя.
-- Если записываешь разговор, учитывай законы о записи (во многих штатах нужно согласие всех сторон).
-- Проверь условия использования Sesame и Zoom.
+`dial` opens the number using the `dial_uri` template from `config.json`:
+`zoomphonecall://{number}` for Zoom Phone (default) or `tel:{number}` for whatever app Windows
+uses for phone links. The call app's exe name (`call_app_exe`) is only used by `status`.
 
-## Дальше
+## Cost
 
-- **Расширение Chrome «вкладка ⇄ вкладка»** — без драйверов, если Zoom Phone работает в веб-клиенте.
-- **Серверный режим 24/7** — Linux-сервер, SIP-номер (Twilio/Telnyx) и браузер с Maya без
-  экрана: звонки по команде с телефона и приём входящих.
-- Автоматический инструктаж: скрипт берёт задачу из календаря или письма и сам надиктовывает её Maya.
+- **Voicemeeter Banana** — free (donationware).
+- **Maya in Sesame** — free at the time of writing.
+- **Telephony** — the only real cost: your Zoom Phone plan or another provider. Calls inside
+  WhatsApp, Telegram or Teams cost nothing extra.
 
-## Лицензия
+So you end up with an essentially free phone assistant with one of the most realistic voices
+around and access to all of Sesame's connectors.
+
+## Ideas (not implemented)
+
+These are hypotheses that build on this setup. I haven't built any of them.
+
+- **Maya dials by herself.** A custom connector (MCP server) plus a skill for Maya with one tool,
+  `dial(number)`, that runs `python maya.py dial …` on the PC. Say "Maya, call John" and she
+  places the call.
+- **Calling from a contact list.** Connect Maya to your contacts (Google Contacts, a CRM,
+  a spreadsheet) through the same MCP: "call John from the client list" → look up the number →
+  `dial`.
+- **Inbound calls.** An automation on an incoming call that launches Sesame and `start`, answers
+  the call (Zoom auto-answer or a hotkey), and lets Maya greet the caller.
+- **A "phone assistant" skill.** Memory and instructions for Maya: introduce herself as an AI
+  assistant, take messages, book meetings in the calendar, send a call summary to email, Notion
+  or a CRM afterwards.
+- **Connecting and transferring.** Transfer the call to a colleague or add them to the
+  conversation (transfer and conference in Zoom Phone) — Maya as a receptionist.
+- **No drivers.** A browser extension that pipes audio tab-to-tab, if the call app also runs in
+  a browser.
+- **24/7 server mode.** A Linux server, a SIP number (Twilio, Telnyx) and a headless browser with
+  Maya: calls on command from your phone and inbound calls without your PC switched on.
+
+Given Sesame's connectors to email, documents, databases and memory, the list of scenarios is
+practically open-ended.
+
+## Laws and ethics
+
+Maya's voice is nearly indistinguishable from a human's, so:
+
+- **Maya should introduce herself as an AI assistant** at the start of a call — put that in her
+  instructions.
+- In the US, calls using an artificial voice fall under the TCPA (FCC ruling, 2024): calls to
+  mobile numbers need the person's prior consent, marketing calls need written consent.
+  Automated calling of strangers is off limits.
+- If you record calls, follow recording-consent laws (many US states require all parties to
+  consent).
+- Check the terms of service of Sesame and of your calling provider.
+
+## Configuration
+
+Copy `config.example.json` to `config.json` and adjust: microphone and speaker names, the browser
+for Maya, Sesame's URL, the call app and the dialing template. `config.json` is git-ignored.
+
+## License
 
 [MIT](LICENSE)

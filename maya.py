@@ -1,5 +1,7 @@
 """
-Maya Phone Bridge — звонки по телефону голосом Maya (Sesame AI) через Zoom Phone.
+Maya Phone Bridge — голос Maya (Sesame AI) в любом приложении для звонков на Windows:
+Zoom, Microsoft Teams, WhatsApp, Telegram, Skype, SIP-софтфоны и т. д.
+Проверено на Zoom Phone (исходящий звонок на мобильный номер).
 
 Управляет маршрутизацией звука в Voicemeeter Banana через официальный Remote API
 (VoicemeeterRemote64.dll). Внешних зависимостей нет; для горячих клавиш нужен
@@ -7,25 +9,25 @@ Maya Phone Bridge — звонки по телефону голосом Maya (Se
 
 Схема (Voicemeeter Banana):
 
-    Zoom  -> динамик  "Voicemeeter Input"      -> полоса VAIO (3) -> B1 (+A1)
-    Edge  -> динамик  "Voicemeeter AUX Input"  -> полоса AUX  (4) -> B2 (+A1)
-    Твой микрофон                              -> полоса HW1  (0) -> по режиму
+    Звонилка -> динамик "Voicemeeter Input"      -> полоса VAIO (3) -> B1 (+A1)
+    Edge     -> динамик "Voicemeeter AUX Input"  -> полоса AUX  (4) -> B2 (+A1)
+    Твой микрофон                                -> полоса HW1  (0) -> по режиму
 
     B1 = "Voicemeeter Out B1"  -> микрофон для Maya (Edge)
-    B2 = "Voicemeeter Out B2"  -> микрофон для Zoom
+    B2 = "Voicemeeter Out B2"  -> микрофон для звонилки (Zoom, Teams, WhatsApp…)
     A1 = твои динамики/наушники (ты слышишь обе стороны)
 
 Команды:
-    python maya.py setup            разовая настройка Voicemeeter (+ маршрутизация Edge/Zoom)
+    python maya.py setup            разовая настройка Voicemeeter (+ устройства для Edge)
     python maya.py start            ЗАПУСК: автопереключение компьютер/телефон, Ctrl+Alt+M, Ctrl+Alt+T
     python maya.py pc               Maya слышит тебя (за компьютером)
-    python maya.py phone            Maya слышит абонента в Zoom и говорит в звонок
-    python maya.py takeover         перехват: ты говоришь с абонентом, Maya молчит и слушает
+    python maya.py phone            Maya слышит собеседника и говорит в звонок
+    python maya.py takeover         перехват: ты говоришь с собеседником, Maya молчит и слушает
     python maya.py off              всё разведено, ничего никуда не уходит
     python maya.py status           показать текущую маршрутизацию
-    python maya.py dial +15551234567  режим phone + набор номера в Zoom Phone
+    python maya.py dial +15551234567  режим phone + набор номера (шаблон dial_uri в config.json)
     python maya.py open             открыть Sesame в Edge
-    python maya.py levels [сек]     живые уровни: микрофон / Zoom / Maya (диагностика)
+    python maya.py levels [сек]     живые уровни: микрофон / звонок / Maya (диагностика)
     python maya.py stop             закрыть Voicemeeter и освободить устройства
 """
 
@@ -61,13 +63,16 @@ DEFAULT_CONFIG = {
     "speakers": "Speakers (Cirrus Logic XU (with APO Extensions))",
     # Браузер, в котором живёт Maya (отдельный от основного, чтобы не тащить в звонок YouTube)
     "maya_browser_exe": "msedge.exe",
-    "zoom_exe": "Zoom.exe",
     "sesame_url": "https://www.sesame.com/",
+    # Приложение для звонков: exe — для проверки в `status`; dial_uri — как набирать номер.
+    #   Zoom Phone: "zoomphonecall://{number}"; системный обработчик (Teams, Phone Link…): "tel:{number}"
+    "call_app_exe": "Zoom.exe",
+    "dial_uri": "zoomphonecall://{number}",
     # Имена виртуальных устройств Voicemeeter Banana (в старых версиях: "VoiceMeeter Output"/"VoiceMeeter Aux Output")
-    "vm_zoom_out": "Voicemeeter Input",
+    "vm_call_out": "Voicemeeter Input",
     "vm_maya_out": "Voicemeeter AUX Input",
     "vm_maya_mic": "Voicemeeter Out B1",
-    "vm_zoom_mic": "Voicemeeter Out B2",
+    "vm_call_mic": "Voicemeeter Out B2",
     # NirSoft SoundVolumeView (необязательно) — для автоматической маршрутизации по приложениям
     "soundvolumeview": r"tools\SoundVolumeView.exe",
     # Автопереключение (start): порог «есть звук» и сколько секунд тишины = конец звонка
@@ -76,8 +81,8 @@ DEFAULT_CONFIG = {
 }
 
 # Индексы Voicemeeter Banana
-MIC, HW2, HW3, ZOOM, MAYA = 0, 1, 2, 3, 4
-STRIP_NAMES = {MIC: "Твой микрофон", ZOOM: "Zoom (абонент)", MAYA: "Maya"}
+MIC, HW2, HW3, CALL, MAYA = 0, 1, 2, 3, 4
+STRIP_NAMES = {MIC: "Твой микрофон", CALL: "Звонок", MAYA: "Maya"}
 BUSES = ("A1", "A2", "A3", "B1", "B2")
 
 OFF = dict(A1=0, A2=0, A3=0, B1=0, B2=0, Mute=0)
@@ -88,26 +93,26 @@ def route(**kw) -> dict:
 
 
 # Для каждого режима — что куда идёт.
-#   A1 = твои уши, B1 = уши Maya, B2 = уши абонента
+#   A1 = твои уши, B1 = уши Maya, B2 = уши собеседника
 MODES: dict[str, dict[int, dict]] = {
     "off": {
         MIC: route(),
-        ZOOM: route(A1=1),
+        CALL: route(A1=1),
         MAYA: route(A1=1),
     },
     "pc": {
         MIC: route(B1=1),          # Maya слышит тебя
-        ZOOM: route(A1=1),         # Zoom слышишь только ты
+        CALL: route(A1=1),         # звонилку слышишь только ты
         MAYA: route(A1=1),         # ты слышишь Maya
     },
     "phone": {
         MIC: route(),              # твой микрофон никуда не идёт
-        ZOOM: route(A1=1, B1=1),   # Maya и ты слышите абонента
-        MAYA: route(A1=1, B2=1),   # абонент и ты слышите Maya
+        CALL: route(A1=1, B1=1),   # Maya и ты слышите собеседника
+        MAYA: route(A1=1, B2=1),   # собеседник и ты слышите Maya
     },
     "takeover": {
-        MIC: route(B1=1, B2=1),    # абонент слышит тебя, Maya тоже (держит контекст)
-        ZOOM: route(A1=1, B1=1),   # ты и Maya слышите абонента
+        MIC: route(B1=1, B2=1),    # собеседник слышит тебя, Maya тоже (держит контекст)
+        CALL: route(A1=1, B1=1),   # ты и Maya слышите собеседника
         MAYA: route(Mute=1),       # Maya замолчала
     },
 }
@@ -115,15 +120,22 @@ MODES: dict[str, dict[int, dict]] = {
 MODE_HELP = {
     "off": "всё разведено",
     "pc": "КОМПЬЮТЕР — Maya слышит тебя",
-    "phone": "ТЕЛЕФОН — Maya слышит абонента и говорит в звонок",
+    "phone": "ТЕЛЕФОН — Maya слышит собеседника и говорит в звонок",
     "takeover": "ПЕРЕХВАТ — говоришь ты, Maya молчит и слушает",
 }
+
+
+LEGACY_KEYS = {"zoom_exe": "call_app_exe", "vm_zoom_out": "vm_call_out", "vm_zoom_mic": "vm_call_mic"}
 
 
 def load_config() -> dict:
     cfg = dict(DEFAULT_CONFIG)
     if CONFIG_PATH.exists():
-        cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        user = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        for old, new in LEGACY_KEYS.items():  # старые config.json (версия «только Zoom»)
+            if old in user:
+                user.setdefault(new, user.pop(old))
+        cfg.update(user)
     return cfg
 
 
@@ -199,7 +211,7 @@ class Voicemeeter:
         return val.value
 
     # Каналы входов Banana для измерения уровня (pre-fader): HW1 = 0-1, VAIO = 6-13, AUX = 14-21
-    LEVEL_CHANNELS = {MIC: (0, 1), ZOOM: (6, 7), MAYA: (14, 15)}
+    LEVEL_CHANNELS = {MIC: (0, 1), CALL: (6, 7), MAYA: (14, 15)}
 
     def level_db(self, strip: int) -> float:
         """Пиковый уровень полосы до фейдера, дБ (не зависит от маршрутизации и mute)."""
@@ -249,7 +261,7 @@ def current_mode(state: dict[int, dict[str, int]]) -> str | None:
 
 def apply_mode(vm: Voicemeeter, mode: str, verify: bool = False) -> None:
     parts = []
-    for strip in (MIC, HW2, HW3, ZOOM, MAYA):
+    for strip in (MIC, HW2, HW3, CALL, MAYA):
         r = MODES[mode].get(strip, route())
         parts += [f"Strip[{strip}].{k}={int(v)}" for k, v in r.items()]
     script = ";".join(parts) + ";"
@@ -297,7 +309,7 @@ def cmd_setup(cfg: dict) -> None:
             f'Strip[{MIC}].{hw_device(vm, cfg["mic"], output=False)};'
             f'Bus[0].{hw_device(vm, cfg["speakers"], output=True)};'
             f'Strip[{MIC}].Label="MIC (you)";'
-            f'Strip[{ZOOM}].Label="ZOOM (callee)";'
+            f'Strip[{CALL}].Label="CALL (remote)";'
             f'Strip[{MAYA}].Label="MAYA";'
         )
         time.sleep(3.0)  # смена устройств перезапускает аудиодвижок
@@ -312,18 +324,18 @@ def setup_app_routing(cfg: dict) -> None:
         print("\nSoundVolumeView не найден — назначь устройства приложениям вручную:\n"
               "  Параметры → Система → Звук → Микшер громкости:\n"
               f"    {cfg['maya_browser_exe']}: вывод = {cfg['vm_maya_out']}, ввод = {cfg['vm_maya_mic']}\n"
-              f"  В Zoom (Настройки → Звук): динамик = {cfg['vm_zoom_out']}, микрофон = {cfg['vm_zoom_mic']}\n"
+              f"  В приложении для звонков: динамик = {cfg['vm_call_out']}, микрофон = {cfg['vm_call_mic']}\n"
               "  (или положи SoundVolumeView.exe в папку tools\\ и повтори setup)")
         return
     # Полные пути устройств: короткие имена («Voicemeeter Input» / «Voicemeeter AUX Input»)
-    # на практике путались. Zoom не трогаем — устройства выбираются в его настройках.
+    # на практике путались. Приложение для звонков не трогаем — устройства выбираются в его настройках.
     drv = "VB-Audio Voicemeeter VAIO\\Device\\"
     exe = cfg["maya_browser_exe"]
     for device, direction in ((cfg["vm_maya_out"], "Render"), (cfg["vm_maya_mic"], "Capture")):
         subprocess.run([str(svv), "/SetAppDefault", f"{drv}{device}\\{direction}", "all", exe], check=False)
         print(f"  {exe}: {device}")
     print(f"Устройства для {exe} назначены. Перезагрузи вкладку Sesame (F5), если она открыта.\n"
-          f"В Zoom выбери вручную: динамик = {cfg['vm_zoom_out']}, микрофон = {cfg['vm_zoom_mic']}.")
+          f"В приложении для звонков выбери: динамик = {cfg['vm_call_out']}, микрофон = {cfg['vm_call_mic']}.")
 
 
 def find_svv(cfg: dict) -> Path | None:
@@ -337,7 +349,7 @@ def find_svv(cfg: dict) -> Path | None:
 
 
 def app_devices(cfg: dict) -> dict[tuple[str, str], set[str]] | None:
-    """Какие устройства реально используют аудиосессии Edge и Zoom: {(exe, Render|Capture): {устройства}}."""
+    """Какие устройства реально используют аудиосессии Edge и звонилки: {(exe, Render|Capture): {устройства}}."""
     import csv
     import tempfile
     svv = find_svv(cfg)
@@ -360,7 +372,7 @@ def app_devices(cfg: dict) -> dict[tuple[str, str], set[str]] | None:
     if rows and "Item ID" not in rows[0]:  # другой набор колонок — диагностика недоступна
         return None
     names = {r["Item ID"]: r["Name"] for r in rows if r.get("Type") == "Device"}
-    exes = {cfg["maya_browser_exe"].lower(), cfg["zoom_exe"].lower()}
+    exes = {cfg["maya_browser_exe"].lower(), cfg["call_app_exe"].lower()}
     result: dict[tuple[str, str], set[str]] = {}
     for r in rows:
         exe = Path(r.get("Process Path") or "").name.lower()
@@ -374,13 +386,14 @@ def check_apps(cfg: dict) -> None:
     devs = app_devices(cfg)
     if devs is None:
         return
-    edge, zoom = cfg["maya_browser_exe"].lower(), cfg["zoom_exe"].lower()
+    edge, app = cfg["maya_browser_exe"].lower(), cfg["call_app_exe"].lower()
+    name = Path(app).stem
     expect = {
         (edge, "Capture"): cfg["vm_maya_mic"], (edge, "Render"): cfg["vm_maya_out"],
-        (zoom, "Capture"): cfg["vm_zoom_mic"], (zoom, "Render"): cfg["vm_zoom_out"],
+        (app, "Capture"): cfg["vm_call_mic"], (app, "Render"): cfg["vm_call_out"],
     }
     labels = {(edge, "Capture"): "Maya слушает", (edge, "Render"): "Maya говорит в",
-              (zoom, "Capture"): "Zoom слушает", (zoom, "Render"): "Zoom говорит в"}
+              (app, "Capture"): f"{name} слушает", (app, "Render"): f"{name} говорит в"}
     print("  Приложения (живые аудиосессии):")
     for key, want in expect.items():
         got = devs.get(key)
@@ -411,7 +424,7 @@ def cmd_status(cfg: dict) -> None:
         on = [b for b in BUSES if state[s][b]]
         mute = "  [MUTE]" if state[s]["Mute"] else ""
         print(f"  {name:<16} → {', '.join(on) or '—'}{mute}")
-    print("  (A1 = ты, B1 = Maya, B2 = абонент)")
+    print("  (A1 = ты, B1 = Maya, B2 = собеседник)")
     check_apps(cfg)
 
 
@@ -427,8 +440,9 @@ def cmd_dial(cfg: dict, number: str) -> None:
         sys.exit(f"Странный номер: {number}")
     with Voicemeeter(cfg) as vm:
         apply_mode(vm, "phone")
-    print(f"Набираю {clean} в Zoom Phone…")
-    os.startfile(f"zoomphonecall://{clean}")
+    uri = cfg["dial_uri"].format(number=clean)
+    print(f"Набираю {clean}: {uri}")
+    os.startfile(uri)
 
 
 def cmd_open(cfg: dict) -> None:
@@ -436,9 +450,9 @@ def cmd_open(cfg: dict) -> None:
 
 
 class Controller:
-    """Текущий режим + автопереключение по звуку из Zoom.
+    """Текущий режим + автопереключение по звуку из приложения для звонков.
 
-    Авто: в режиме pc появился звук из Zoom (гудки, абонент) → phone.
+    Авто: в режиме pc появился звук из звонилки (гудки, собеседник) → phone.
     В phone/takeover тишина со всех сторон дольше hold секунд → pc.
     Режим off авто не трогает.
     """
@@ -469,14 +483,14 @@ class Controller:
                     self.mode, self.last_activity = actual, now
         with self.lock:
             mode = self.mode
-            zoom = self.vm.level_db(ZOOM) > self.threshold
+            call = self.vm.level_db(CALL) > self.threshold
             maya = self.vm.level_db(MAYA) > self.threshold
             mic = self.vm.level_db(MIC) > self.threshold
         now = time.monotonic()
-        if mode == "pc" and zoom:
-            self.set("phone", "в Zoom появился звук — Maya переключилась на звонок")
+        if mode == "pc" and call:
+            self.set("phone", "в звонке появился звук — Maya переключилась на звонок")
         elif mode in ("phone", "takeover"):
-            if zoom or maya or (mode == "takeover" and mic):
+            if call or maya or (mode == "takeover" and mic):
                 self.last_activity = now
             elif now - self.last_activity > self.hold:
                 self.set("pc", f"{int(self.hold)} с тишины — звонок окончен, Maya снова слышит тебя")
@@ -518,9 +532,9 @@ def cmd_start(cfg: dict, auto: bool = True) -> None:
             keyboard.add_hotkey("ctrl+alt+m", ctl.toggle)
             keyboard.add_hotkey("ctrl+alt+t", ctl.takeover)
             print("Ctrl+Alt+M — переключить компьютер / телефон вручную")
-            print("Ctrl+Alt+T — перехват: ты говоришь с абонентом, Maya молчит (ещё раз — вернуть Maya)")
+            print("Ctrl+Alt+T — перехват: ты говоришь с собеседником, Maya молчит (ещё раз — вернуть Maya)")
         if auto:
-            print(f"Авто: звук в Zoom → ТЕЛЕФОН, {int(ctl.hold)} с тишины → КОМПЬЮТЕР")
+            print(f"Авто: звук в звонке → ТЕЛЕФОН, {int(ctl.hold)} с тишины → КОМПЬЮТЕР")
         print("Не закрывай это окно. Ctrl+C — выход.", flush=True)
         try:
             while True:
@@ -534,20 +548,20 @@ def cmd_start(cfg: dict, auto: bool = True) -> None:
 def cmd_levels(cfg: dict, seconds: float) -> None:
     """Живые уровни — для диагностики: кто реально звучит."""
     with Voicemeeter(cfg) as vm:
-        print("дБ:   микрофон |   Zoom   |   Maya     (тишина ≈ -120, речь ≈ -30…-10)")
+        print("дБ:   микрофон |  звонок  |   Maya     (тишина ≈ -120, речь ≈ -30…-10)")
         end = time.monotonic() + seconds
         while time.monotonic() < end:
-            peaks = {s: -120.0 for s in (MIC, ZOOM, MAYA)}
+            peaks = {s: -120.0 for s in (MIC, CALL, MAYA)}
             t = time.monotonic() + 1.0
             while time.monotonic() < t:
                 for s in peaks:
                     peaks[s] = max(peaks[s], vm.level_db(s))
                 time.sleep(0.05)
-            print(f"     {peaks[MIC]:8.1f} | {peaks[ZOOM]:8.1f} | {peaks[MAYA]:8.1f}", flush=True)
+            print(f"     {peaks[MIC]:8.1f} | {peaks[CALL]:8.1f} | {peaks[MAYA]:8.1f}", flush=True)
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Maya Phone Bridge — Zoom Phone ⇄ Sesame AI")
+    p = argparse.ArgumentParser(description="Maya Phone Bridge — любые звонки ⇄ Sesame AI (Maya)")
     sub = p.add_subparsers(dest="cmd", required=True)
     for m in MODES:
         sub.add_parser(m, help=MODE_HELP[m])
@@ -556,7 +570,7 @@ def main() -> None:
     d = sub.add_parser("dial", help="режим phone + набор номера")
     d.add_argument("number")
     sub.add_parser("open", help="открыть Sesame в Edge")
-    h = sub.add_parser("start", help="запуск: автопереключение компьютер/телефон + Ctrl+Alt+M")
+    h = sub.add_parser("start", help="запуск: автопереключение компьютер/телефон, Ctrl+Alt+M, Ctrl+Alt+T")
     h.add_argument("--no-auto", action="store_true", help="без автопереключения")
     lv = sub.add_parser("levels", help="живые уровни сигнала (диагностика)")
     lv.add_argument("seconds", nargs="?", type=float, default=15)
