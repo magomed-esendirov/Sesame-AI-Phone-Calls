@@ -1,0 +1,7 @@
+config.json
+tools/*.exe
+tools/*.chm
+tools/*.txt
+__pycache__/
+*.pyc
+.venv/

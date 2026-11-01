@@ -1,0 +1,13 @@
+{
+  "voicemeeter_dir": "C:\\Program Files (x86)\\VB\\Voicemeeter",
+  "mic": "Microphone Array on SoundWire Device (5- Cirrus Logic XU)",
+  "speakers": "Speakers (Cirrus Logic XU (with APO Extensions))",
+  "maya_browser_exe": "msedge.exe",
+  "zoom_exe": "Zoom.exe",
+  "sesame_url": "https://www.sesame.com/",
+  "vm_zoom_out": "Voicemeeter Input",
+  "vm_maya_out": "Voicemeeter AUX Input",
+  "vm_maya_mic": "Voicemeeter Out B1",
+  "vm_zoom_mic": "Voicemeeter Out B2",
+  "soundvolumeview": "tools\\SoundVolumeView.exe"
+}
