@@ -306,12 +306,7 @@ def cmd_setup(cfg: dict) -> None:
 
 
 def setup_app_routing(cfg: dict) -> None:
-    svv = Path(cfg["soundvolumeview"])
-    if not svv.is_absolute():
-        svv = ROOT / svv
-    if not svv.exists():
-        found = shutil.which("SoundVolumeView.exe")
-        svv = Path(found) if found else None
+    svv = find_svv(cfg)
     if not svv:
         print("\nSoundVolumeView не найден — назначь устройства приложениям вручную:\n"
               "  Параметры → Система → Звук → Микшер громкости:\n"
@@ -319,16 +314,76 @@ def setup_app_routing(cfg: dict) -> None:
               f"  В Zoom (Настройки → Звук): динамик = {cfg['vm_zoom_out']}, микрофон = {cfg['vm_zoom_mic']}\n"
               "  (или положи SoundVolumeView.exe в папку tools\\ и повтори setup)")
         return
-    pairs = [
-        (cfg["vm_maya_out"], cfg["maya_browser_exe"]),
-        (cfg["vm_maya_mic"], cfg["maya_browser_exe"]),
-        (cfg["vm_zoom_out"], cfg["zoom_exe"]),
-        (cfg["vm_zoom_mic"], cfg["zoom_exe"]),
-    ]
-    for device, exe in pairs:
-        subprocess.run([str(svv), "/SetAppDefault", device, "all", exe], check=False)
+    # Полные пути устройств: короткие имена («Voicemeeter Input» / «Voicemeeter AUX Input»)
+    # на практике путались. Zoom не трогаем — устройства выбираются в его настройках.
+    drv = "VB-Audio Voicemeeter VAIO\\Device\\"
+    exe = cfg["maya_browser_exe"]
+    for device, direction in ((cfg["vm_maya_out"], "Render"), (cfg["vm_maya_mic"], "Capture")):
+        subprocess.run([str(svv), "/SetAppDefault", f"{drv}{device}\\{direction}", "all", exe], check=False)
         print(f"  {exe}: {device}")
-    print("Маршрутизация по приложениям назначена (перезапусти Edge и Zoom, если они открыты).")
+    print(f"Устройства для {exe} назначены. Перезагрузи вкладку Sesame (F5), если она открыта.\n"
+          f"В Zoom выбери вручную: динамик = {cfg['vm_zoom_out']}, микрофон = {cfg['vm_zoom_mic']}.")
+
+
+def find_svv(cfg: dict) -> Path | None:
+    svv = Path(cfg["soundvolumeview"])
+    if not svv.is_absolute():
+        svv = ROOT / svv
+    if svv.exists():
+        return svv
+    found = shutil.which("SoundVolumeView.exe")
+    return Path(found) if found else None
+
+
+def app_devices(cfg: dict) -> dict[tuple[str, str], set[str]] | None:
+    """Какие устройства реально используют аудиосессии Edge и Zoom: {(exe, Render|Capture): {устройства}}."""
+    import csv
+    import tempfile
+    svv = find_svv(cfg)
+    if not svv:
+        return None
+    out = Path(tempfile.gettempdir()) / "maya_svv.csv"
+    subprocess.run([str(svv), "/scomma", str(out)], check=False)
+    for _ in range(30):
+        if out.exists() and out.stat().st_size:
+            break
+        time.sleep(0.1)
+    rows = list(csv.DictReader(out.read_text(encoding="mbcs", errors="replace").splitlines()))
+    names = {r["Item ID"]: r["Name"] for r in rows if r.get("Type") == "Device"}
+    exes = {cfg["maya_browser_exe"].lower(), cfg["zoom_exe"].lower()}
+    result: dict[tuple[str, str], set[str]] = {}
+    for r in rows:
+        exe = Path(r.get("Process Path") or "").name.lower()
+        if r.get("Type") == "Application" and exe in exes:
+            dev = names.get(r["Item ID"].split("|")[0], r.get("Device Name", "?"))
+            result.setdefault((exe, r["Direction"]), set()).add(dev)
+    return result
+
+
+def check_apps(cfg: dict) -> None:
+    devs = app_devices(cfg)
+    if devs is None:
+        return
+    edge, zoom = cfg["maya_browser_exe"].lower(), cfg["zoom_exe"].lower()
+    expect = {
+        (edge, "Capture"): cfg["vm_maya_mic"], (edge, "Render"): cfg["vm_maya_out"],
+        (zoom, "Capture"): cfg["vm_zoom_mic"], (zoom, "Render"): cfg["vm_zoom_out"],
+    }
+    labels = {(edge, "Capture"): "Maya слушает", (edge, "Render"): "Maya говорит в",
+              (zoom, "Capture"): "Zoom слушает", (zoom, "Render"): "Zoom говорит в"}
+    print("  Приложения (живые аудиосессии):")
+    for key, want in expect.items():
+        got = devs.get(key)
+        if not got:
+            print(f"    {labels[key]:<16} — нет активной сессии")
+            continue
+        ok = want in got
+        extra = sorted(got - {want})
+        mark = "OK " if ok and not extra else "!! "
+        line = f"    {mark}{labels[key]:<16} {', '.join(sorted(got))}"
+        if not ok or extra:
+            line += f"   (нужно: {want})"
+        print(line)
 
 
 def cmd_status(cfg: dict) -> None:
@@ -344,6 +399,7 @@ def cmd_status(cfg: dict) -> None:
         mute = "  [MUTE]" if state[s]["Mute"] else ""
         print(f"  {name:<16} → {', '.join(on) or '—'}{mute}")
     print("  (A1 = ты, B1 = Maya, B2 = абонент)")
+    check_apps(cfg)
 
 
 def cmd_stop(cfg: dict) -> None:
